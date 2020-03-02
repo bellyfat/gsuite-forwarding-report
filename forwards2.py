@@ -115,7 +115,7 @@ def main():
     elapsed_time = time.time() - start_time
     print "\rFinished in " + str(int(elapsed_time)) + " seconds.                                   "
     sys.stdout.flush()
-    print "Successfully retreived " + str(success) + " groups."
+    print "Successfully retreived " + str(success) + " users."
     print "-----------------------------------------------"
     print "Errors: " + str(errors)
     for r in retries:

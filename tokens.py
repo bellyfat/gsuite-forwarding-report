@@ -32,6 +32,8 @@ def main():
     log("Starting report.")
     print "Retrieving list of all users...please wait."
     users = get_users()
+    users.extend(get_users())
+
     print "\nTotal Users: " + str(len(users))
 
     # Set up workers
@@ -139,6 +141,28 @@ def write_errors(text):
         f.write(time.strftime("%c") + '\n-------------------------------\n')
         f.write(text)
 
+
+# Wrapper to handle execute functions for Google API, retries/throttling happens here 
+def api_execute(in_function):
+    result = None
+    attempts = 1
+    max_attempts = 5
+    wait_time = 0
+    while attempts < max_attempts:
+        try:
+            result = in_function()
+        except apiclient.errors.HttpError as e:
+            if e.resp.status == 403:
+                attempts += 1
+                wait_time += 2
+                time.sleep(wait_time)
+                continue
+            else:
+                return ((attempts - 1), result)
+        return ((attempts - 1), result)
+    return ((attempts - 1), result)
+
+
 def get_users():
     auth = unigoogle.Auth()
     auth.load_auth()
@@ -174,7 +198,6 @@ def get_tokens(worker_num, in_q, out_q):
     time.sleep(random.random())
     auth = unigoogle.Auth()
     auth.load_auth()
-   # auth = unigoogle.ServiceAuth()
 
     service = auth.api_service('admin', 'directory_v1')
 
@@ -189,40 +212,22 @@ def get_tokens(worker_num, in_q, out_q):
         data = dict()
         data['result'] = 'ok'
         data['thread'] = worker_num
-        nextPageToken = ''
-        data['retries'] = 0
-        
-        # START HERE WITH TOKENS
-        # Auth as the user we need to check
-       ## auth.load_auth(user_address)
-       ## gmailservice = auth.api_service('gmail', 'v1')
         
         timerstart = time.time()
-        try:
-            
-            worker_log(worker_num,"Trying Google API for: "+user_address+"\n")
-            result = service.tokens().list(userKey=user_address).execute()
-            worker_log(worker_num,"Finished Google API for: "+user_address+"\n")
 
-            if result.get('items') is not None:
-                for one in result['items']:
-                    tokens.append(one['clientId'])
-            print tokens
-            # result = gmailservice.users().settings().sendAs().list(userId=user_address).execute()
-            # if result.get('sendAs') is not None:
-            #     for one in result['sendAs']:
-            #         send_as.append(one['sendAsEmail'])
-            #         if one['replyToAddress'] != '':
-            #             reply_tos.append(one['replyToAddress'])
-                        
-            worker_log(worker_num,"Trying Google API for: "+user_address+"\n")
-	
-        except:
-            e = sys.exc_info()[0]
-            print e
-            tokens.append("ERROR")
-            worker_log(worker_num,"Exception for: "+user_address+" "+str(e)+"\n")
+        worker_log(worker_num,"Trying Google API for: "+user_address+"\n")
+        
+        (retries, result) = api_execute(service.tokens().list(userKey=user_address).execute)
 
+        data['retries'] = retries
+
+        worker_log(worker_num,"Finished Google API for: "+user_address+"\n")
+        
+        if result is None:
+            data['result'] = 'error'
+        elif result.get('items') is not None:
+            for one in result['items']:
+                tokens.append(one['clientId'])
 
         worker_log(worker_num,"Checking in: "+user_address+"\n")
         out_q.put((user_address, data, tokens))
@@ -230,6 +235,7 @@ def get_tokens(worker_num, in_q, out_q):
 
         in_q.task_done()
         worker_log(worker_num,"Task Done: "+user_address+"\n\n")
+
 
 def ignore_error(e):
     # Find errors that are safe to ignore and don't need to be retried
