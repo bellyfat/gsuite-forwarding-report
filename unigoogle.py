@@ -13,6 +13,7 @@ import apiclient.discovery
 import apiclient.errors
 import apiclient.http
 import httplib2
+import time
 
 import pprint
 
@@ -150,3 +151,26 @@ class ServiceAuth:
 		#pprint.pprint(vars(self.http.credentials))
 		return apiclient.discovery.build(api_name, api_version, credentials=self.credentials)
 
+
+
+# Wrapper to handle execute functions for Google API, retries/throttling happens here 
+def api_execute(in_function):
+    result = {
+		"data" : None,
+		"retries" : 0
+	}
+    max_attempts = 5
+    wait_time = 0
+    while result['retries'] <= max_attempts:
+        try:
+            result['data'] = in_function()
+        except apiclient.errors.HttpError as e:
+            if e.resp.status == 403:
+				result['retries'] += 1
+				wait_time = result['retries'] * 2
+				time.sleep(wait_time)
+				continue
+            else:
+                return result
+        return result
+    return result

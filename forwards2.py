@@ -9,6 +9,7 @@ import sys
 import csv
 import os
 import pprint
+import json
 from socket import error
 
 import subprocess
@@ -205,23 +206,21 @@ def get_users():
     count = 0
     retries = 0
     while nextPageToken is not None:
-        try:
-            result = service.users().list(customer='my_customer', domain=google_domain,
-                                          pageToken=nextPageToken).execute()
-        except apiclient.errors.HttpError, e:
-            if retry(e, retries):
-                retries += 1
-                continue
-        count += len(result['users'])
+        result = unigoogle.api_execute(service.users().list(customer='my_customer', domain=google_domain,
+                                        pageToken=nextPageToken).execute)
+        if result['data'] is None:
+            log("Error retreiving list of users")
+            sys.exit("Error retreiving list of users")
+        count += len(result['data']['users'])
         print '\r' + str(count),
         sys.stdout.flush()
-        for one in result['users']:
+        for one in result['data']['users']:
             users.append(one['primaryEmail'])
 
-        if result.get('nextPageToken') is None:
+        if result['data'].get('nextPageToken') is None:
             nextPageToken = None
         else:
-            nextPageToken = result['nextPageToken']
+            nextPageToken = result['data']['nextPageToken']
 
     return users
 
@@ -249,31 +248,36 @@ def get_forwards(worker_num, in_q, out_q):
         gmailservice = auth.api_service('gmail', 'v1')
 
         timerstart = time.time()
-        try:
-            worker_log(worker_num,"Trying Google API for: "+user_address+"\n")
-            result = gmailservice.users().settings().forwardingAddresses().list(userId=user_address).execute()
-            worker_log(worker_num,"Finished Google API for: "+user_address+"\n")
 
-            if result.get('forwardingAddresses') is not None:
-                for one in result['forwardingAddresses']:
+        # Get forwarding addresses
+        worker_log(worker_num,"Trying Google API for: "+user_address+"\n")
+        result = unigoogle.api_execute(gmailservice.users().settings().forwardingAddresses().list(userId=user_address).execute)
+        worker_log(worker_num,"Finished Google API for: "+user_address+"\n")
+
+        if result['data'] is None:
+            forwards.append("ERROR")
+            worker_log(worker_num,"Exception for: "+user_address+" "+str(e)+"\n")
+        else:
+            if result['data'].get('forwardingAddresses') is not None:
+                for one in result['data']['forwardingAddresses']:
                     forwards.append(one['forwardingEmail'])
 
-            result = gmailservice.users().settings().sendAs().list(userId=user_address).execute()
-            if result.get('sendAs') is not None:
-                for one in result['sendAs']:
+        # Get sendas addresses & reply-tos
+        worker_log(worker_num,"Trying Google API for: "+user_address+"\n")
+        result = unigoogle.api_execute(gmailservice.users().settings().sendAs().list(userId=user_address).execute)
+        worker_log(worker_num,"Finished Google API for: "+user_address+"\n")
+
+        if result['data'] is None:
+            reply_tos.append("ERROR")
+            worker_log(worker_num,"Exception for: "+user_address+" "+str(e)+"\n")
+        else:
+            if result['data'].get('sendAs') is not None:
+                for one in result['data']['sendAs']:
                     send_as.append(one['sendAsEmail'])
                     if one['replyToAddress'] != '':
                         reply_tos.append(one['replyToAddress'])
-                        
-            worker_log(worker_num,"Trying Google API for: "+user_address+"\n")
-	
-        except:
-            e = sys.exc_info()[0]
-            print e
-            forwards.append("ERROR")
-            worker_log(worker_num,"Exception for: "+user_address+" "+str(e)+"\n")
-
-
+                    
+    
         worker_log(worker_num,"Checking in: "+user_address+"\n")
         out_q.put((user_address, data, forwards, reply_tos, send_as))
         worker_log(worker_num,"Checked in: "+user_address+"\n")
@@ -290,30 +294,6 @@ def ignore_error(e):
         return True
     if reason == 'failedPrecondition':
         return True
-    return False
-
-def retry(e, retries):
-    try:
-        # Load Json body.
-        error = simplejson.loads(e.content)
-        reason = error['error']['errors'][0]['reason']
-
-        if retries <= 2 and (reason == 'backendError' or reason == 'internalError'):
-            print "DEBUG: Retrying because of 500 error."
-            return True
-
-        if retries == 5:
-            return False
-        if reason == 'userRateLimitExceeded' or reason == 'quotaExceeded':
-            amount = (retries + 1) * 2
-            time.sleep((retries + 1) * 2)
-            return True
-        # More error information can be retrieved with error.get('errors').
-    except:
-        # Could not load Json body.
-        print "error in retry function"
-        print str(e.resp.status) + " " + str(e.resp.reason)
-
     return False
 
 def log(text):

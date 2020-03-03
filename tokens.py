@@ -32,7 +32,6 @@ def main():
     log("Starting report.")
     print "Retrieving list of all users...please wait."
     users = get_users()
-    users.extend(get_users())
 
     print "\nTotal Users: " + str(len(users))
 
@@ -142,27 +141,6 @@ def write_errors(text):
         f.write(text)
 
 
-# Wrapper to handle execute functions for Google API, retries/throttling happens here 
-def api_execute(in_function):
-    result = None
-    attempts = 1
-    max_attempts = 5
-    wait_time = 0
-    while attempts < max_attempts:
-        try:
-            result = in_function()
-        except apiclient.errors.HttpError as e:
-            if e.resp.status == 403:
-                attempts += 1
-                wait_time += 2
-                time.sleep(wait_time)
-                continue
-            else:
-                return ((attempts - 1), result)
-        return ((attempts - 1), result)
-    return ((attempts - 1), result)
-
-
 def get_users():
     auth = unigoogle.Auth()
     auth.load_auth()
@@ -174,23 +152,21 @@ def get_users():
     count = 0
     retries = 0
     while nextPageToken is not None:
-        try:
-            result = service.users().list(customer='my_customer', domain=google_domain,
-                                          pageToken=nextPageToken).execute()
-        except apiclient.errors.HttpError, e:
-            if retry(e, retries):
-                retries += 1
-                continue
-        count += len(result['users'])
+        result = unigoogle.api_execute(service.users().list(customer='my_customer', domain=google_domain,
+                                        pageToken=nextPageToken).execute)
+        if result['data'] is None:
+            log("Error retreiving list of users")
+            sys.exit("Error retreiving list of users")
+        count += len(result['data']['users'])
         print '\r' + str(count),
         sys.stdout.flush()
-        for one in result['users']:
+        for one in result['data']['users']:
             users.append(one['primaryEmail'])
 
-        if result.get('nextPageToken') is None:
+        if result['data'].get('nextPageToken') is None:
             nextPageToken = None
         else:
-            nextPageToken = result['nextPageToken']
+            nextPageToken = result['data']['nextPageToken']
 
     return users
 
@@ -217,16 +193,16 @@ def get_tokens(worker_num, in_q, out_q):
 
         worker_log(worker_num,"Trying Google API for: "+user_address+"\n")
         
-        (retries, result) = api_execute(service.tokens().list(userKey=user_address).execute)
+        result = unigoogle.api_execute(service.tokens().list(userKey=user_address).execute)
 
-        data['retries'] = retries
+        data['retries'] = result['retries']
 
         worker_log(worker_num,"Finished Google API for: "+user_address+"\n")
         
-        if result is None:
+        if result['data'] is None:
             data['result'] = 'error'
-        elif result.get('items') is not None:
-            for one in result['items']:
+        elif result['data'].get('items') is not None:
+            for one in result['data']['items']:
                 tokens.append(one['clientId'])
 
         worker_log(worker_num,"Checking in: "+user_address+"\n")
@@ -246,30 +222,6 @@ def ignore_error(e):
         return True
     if reason == 'failedPrecondition':
         return True
-    return False
-
-def retry(e, retries):
-    try:
-        # Load Json body.
-        error = simplejson.loads(e.content)
-        reason = error['error']['errors'][0]['reason']
-
-        if retries <= 2 and (reason == 'backendError' or reason == 'internalError'):
-            print "DEBUG: Retrying because of 500 error."
-            return True
-
-        if retries == 5:
-            return False
-        if reason == 'userRateLimitExceeded' or reason == 'quotaExceeded':
-            amount = (retries + 1) * 2
-            time.sleep((retries + 1) * 2)
-            return True
-        # More error information can be retrieved with error.get('errors').
-    except:
-        # Could not load Json body.
-        print "error in retry function"
-        print str(e.resp.status) + " " + str(e.resp.reason)
-
     return False
 
 def log(text):
