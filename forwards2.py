@@ -256,7 +256,7 @@ def get_forwards(worker_num, in_q, out_q):
 
         if result['data'] is None:
             forwards.append("ERROR")
-            worker_log(worker_num,"Exception for: "+user_address+" "+str(e)+"\n")
+            worker_log(worker_num,"Exception for: "+user_address+"\n")
         else:
             if result['data'].get('forwardingAddresses') is not None:
                 for one in result['data']['forwardingAddresses']:
@@ -269,7 +269,7 @@ def get_forwards(worker_num, in_q, out_q):
 
         if result['data'] is None:
             reply_tos.append("ERROR")
-            worker_log(worker_num,"Exception for: "+user_address+" "+str(e)+"\n")
+            worker_log(worker_num,"Exception for: "+user_address+"\n")
         else:
             if result['data'].get('sendAs') is not None:
                 for one in result['data']['sendAs']:

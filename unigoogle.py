@@ -155,22 +155,25 @@ class ServiceAuth:
 
 # Wrapper to handle execute functions for Google API, retries/throttling happens here 
 def api_execute(in_function):
-    result = {
+	result = {
 		"data" : None,
 		"retries" : 0
 	}
-    max_attempts = 5
-    wait_time = 0
-    while result['retries'] <= max_attempts:
-        try:
-            result['data'] = in_function()
-        except apiclient.errors.HttpError as e:
-            if e.resp.status == 403:
-				result['retries'] += 1
-				wait_time = result['retries'] * 2
-				time.sleep(wait_time)
-				continue
-            else:
-                return result
-        return result
-    return result
+	max_attempts = 5
+	wait_time = 0
+	while result['retries'] <= max_attempts:
+		try:
+			result['data'] = in_function()
+		except apiclient.errors.HttpError as e:
+			#            if e.resp.status == 403:
+			result['retries'] += 1
+			wait_time = result['retries'] * 2
+			time.sleep(wait_time)
+			continue
+		except Exception as e:
+			result['retries'] += 1
+			wait_time = result['retries'] * 2
+			time.sleep(wait_time)
+			continue
+		return result
+	return result
